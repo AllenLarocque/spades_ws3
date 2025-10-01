@@ -56,10 +56,7 @@ yields_period_length = 10
 yields_x_unit = 'years'
 time_step = 1
 max_age = 1000
-try:
-    dat_path = os.path.abspath(r.getPaths()['inputPath'])
-except:
-    dat_path = '../../../input'
+
 target_path = join(dat_path, 'targets.csv')
 yld_path = dat_path
 tolerance = 10.
