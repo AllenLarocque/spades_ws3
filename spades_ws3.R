@@ -85,6 +85,7 @@ Init <- function(sim) {
     list.files(path = modulePath(sim), full.names = TRUE)[.] # current module path
   #py$sys$path <- insert(py$sys$path, 1, file.path(cmp, "python"))
   #py$sys$path <- insert(py$sys$path, 1, file.path(cmp, "python", "ws3"))
+  py$dat_path<-inputPath(sim)
   py$basenames <- P(sim)$basenames
   py$enable_debugpy <- P(sim)$enable.debugpy
   py_run_file(file.path(cmp, "python", "spadesws3_params.py"))
@@ -206,19 +207,19 @@ applyGrow <- function(sim) {
 
 .inputObjects <- function(sim) {
   # TODO: this should check for "is there a python virtual environment", not "dir.exists" to allow for user's own virtual env.
-  needed <- c("numba>=0.58", "ws3", "datalad[full]", "geopandas", "seaborn", "folium", "debugpy")
-  if (reticulate::virtualenv_exists("r-reticulate")) {
-    reticulate::py_install(needed)
-  } else {
-    reticulate::virtualenv_create("r-reticulate", packages = needed)
-  }
-  reticulate::use_virtualenv("r-reticulate")
+ # needed <- c("numba>=0.58", "ws3", "datalad[full]", "geopandas", "seaborn", "folium", "debugpy")
+#  if (reticulate::virtualenv_exists("r-reticulate")) {
+#   reticulate::py_install(needed)
+#  } else {
+ #   reticulate::virtualenv_create("r-reticulate", packages = needed)
+  #}
+  #reticulate::use_virtualenv("r-reticulate")
 
   # make sure that datalad-managed input files have all been downloaded from the cloud
-  system("datalad get input -r")
+  #system("datalad get input -r")
 
   #cacheTags <- c(currentModule(sim), "function:.inputObjects") ## uncomment this if Cache is being used
-  dPath <- asPath(getOption("reproducible.destinationPath", dataPath(sim)), 1)
-  message(currentModule(sim), ": using dataPath '", dPath, "'.")
+  #dPath <- asPath(getOption("reproducible.destinationPath", dataPath(sim)), 1)
+  #message(currentModule(sim), ": using dataPath '", dPath, "'.")
   return(invisible(sim))
 }
