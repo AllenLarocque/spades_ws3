@@ -140,10 +140,10 @@ def simulate_harvest(fm, basenames, year,
     bootstrap_areas(fm, basenames, tif_path, hdt, year, new_dts=False)
     fm.reset()
     if mode == 'optimize':
-        # schedule_harvest_optimize(fm, basenames, p_max_hv=target_scalefactors,
-        #                           mgmt_unit_theme=mgmt_unit_theme, workers=workers)
-        profile_schedule_harvest_optimize(fm, basenames, target_scalefactors, 
-                                          mgmt_unit_theme, workers)
+         schedule_harvest_optimize(fm, basenames, p_max_hv=target_scalefactors,
+                                   mgmt_unit_theme=mgmt_unit_theme, workers=workers)
+        #profile_schedule_harvest_optimize(fm, basenames, target_scalefactors, 
+        #                                  mgmt_unit_theme, workers)
     elif mode == 'areacontrol':
         schedule_harvest_areacontrol(fm, 
                                      target_scalefactors=target_scalefactors,
