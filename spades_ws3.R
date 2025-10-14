@@ -5,9 +5,9 @@
 # in R packages. If exact location is required, functions will be: sim$<moduleName>$FunctionName
 defineModule(sim, list(
   name = "spades_ws3",
-  description = NA, #"insert module description here",
-  keywords = NA, # c("insert key words here"),
-  authors = c(person(c("Gregory", "Paradis"), "Last", email = "0@01101.io", role = c("aut", "cre"))),
+  description = paste("This is the core module for spades_WS3 module family. It is a wrapper for WS3"),
+  keywords = c("harvesting","dataInit","WS3"),
+  authors = c(person("Gregory","Paradis", email = "0@01101.io", role = c("aut", "cre"))),
   childModules = character(0),
   version = list(SpaDES.core = "0.2.5.9000", spades_ws3 = "0.0.1"),
   spatialExtent = raster::extent(rep(NA_real_, 4)),
