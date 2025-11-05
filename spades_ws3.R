@@ -1,8 +1,3 @@
-
-# Everything in this file gets sourced during simInit, and all functions and objects
-# are put into the simList. To use objects, use sim$xxx, and are thus globally available
-# to all modules. Functions can be used without sim$ as they are namespaced, like functions
-# in R packages. If exact location is required, functions will be: sim$<moduleName>$FunctionName
 defineModule(sim, list(
   name = "spades_ws3",
   description = paste("This is the core module for spades_WS3 module family. It is a wrapper for WS3"),
@@ -36,10 +31,10 @@ defineModule(sim, list(
     defineParameter(".useCache", "logical", FALSE, NA, NA, "Should this entire module be run with caching activated? This is generally intended for data-type modules, where stochasticity and time are not relevant")
   ),
   inputObjects = bind_rows(
-    expectsInput(objectName = "landscape", objectClass = "RasterStack", desc = "stand age", sourceURL = NA)
+    expectsInput(objectName = "landscape", objectClass = "SpatRaster", desc = "stand age", sourceURL = NA)
   ),
   outputObjects = bind_rows(
-    createsOutput(objectName = 'landscape', objectClass = 'RasterStack', desc = 'raster stack of landscape attributes')
+    createsOutput(objectName = 'landscape', objectClass = 'SpatRaster', desc = 'SpatRaster landscape attributes')
   )
 ))
 
@@ -78,13 +73,10 @@ doEvent.spades_ws3 = function(sim, eventTime, eventType) {
 
 Init <- function(sim) {
 
-  # library(R.utils) # not necessary
-  # library(SpaDES.core) # force loading SpaDES.core if it isn't already, so py_run_file works
   if (is.null(P(sim)$basenames)) stop(paste("'basenames' parameter value not specified in", currentModule(sim)))
   cmp <- grep(pattern = paste0(currentModule(sim), "$"), x = list.files(modulePath(sim))) %>%
     list.files(path = modulePath(sim), full.names = TRUE)[.] # current module path
-  #py$sys$path <- insert(py$sys$path, 1, file.path(cmp, "python"))
-  #py$sys$path <- insert(py$sys$path, 1, file.path(cmp, "python", "ws3"))
+
   py$dat_path<-inputPath(sim)
   py$basenames <- P(sim)$basenames
   py$enable_debugpy <- P(sim)$enable.debugpy
@@ -108,7 +100,7 @@ plotFun <- function(sim) {
 }
 
 
-updateAges <- function(sim, offset = 0) {
+updateAges <- function(sim, offset = 1) {
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
   files1 <- sapply(P(sim)$basenames,
                    function(bn) file.path(inputPath(sim),
@@ -120,62 +112,59 @@ updateAges <- function(sim, offset = 0) {
                                           P(sim)$tif.path,
                                           bn,
                                           paste("inventory_", toString(year+offset), ".tif", sep="")))
-  #rs.list <- sapply(files1, stack) # one stack per MU
-  #rs.list <- lapply(files1, function(f) stack(f)[])  # Load stack and copy all values to memory
-  #rs.list <- lapply(files1, function(f) {
-  #  raster::stack(f) %>% raster::stack()  # force re-stack to drop filename reference
-  #})
-  #rs.list <- lapply(files1, function(f) {
-  #  s <- raster::stack(f)
-  #  raster::stack(lapply(1:nlayers(s), function(i) raster::raster(s[[i]])))  # break file link
-  #})
+
 
   rs.list <- lapply(files1, function(f) {
-    s <- raster::stack(f)
-    # Read each layer fully into memory, drop file-backed pointer
-    layers <- lapply(1:nlayers(s), function(i) {
-      r <- s[[i]]
-      values <- raster::getValues(r)
-      r2 <- raster::raster(r)  # copy metadata
-      raster::values(r2) <- values
-      return(r2)
-    })
-    raster::stack(layers)
+    r <- terra::rast(f)
+    r <- terra::deepcopy(r)  # ensures a memory copy, not linked to disk
+    r
   })
+  names(rs.list) <- P(sim)$basenames  # Rename the list members their respective TSA names
+
+
 
   ###############################################################################
   # age.offset <- -1 # hack (why are age values in landscape raster stack off by 1?)
   ###############################################################################
 
   rs.list <- rapply(rs.list,  function(rs) {
-                      rs[[2]] <- crop(sim$landscape$age, rs[[2]]) %>% mask(., rs[[2]])
-                      rs[[2]][is.nan(rs[[2]])] <- NA
-                      return(rs)})
-  mapply(writeRaster, rs.list, files2, format='GTiff', overwrite=TRUE, datatype='INT4S')
+    rs[[2]] <- terra::crop(sim$landscape$age, rs[[2]]) %>% terra::mask(., rs[[2]])
+    rs[[2]][is.nan(rs[[2]])] <- NA
+    return(rs)})
+  mapply(terra::writeRaster, rs.list, files2, filetype='GTiff', overwrite=TRUE, datatype='INT4S')
   return(invisible(sim))
 }
 
 
 loadAges <- function(sim) {
-  # browser()
+
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
   files <- sapply(P(sim)$basenames,
                   function(bn) file.path(inputPath(sim),
                                          P(sim)$tif.path,
                                          bn,
                                          paste("inventory_", toString(year), ".tif", sep="")))
-  x <- sapply(files, raster, band=2)
-  if (length(x) > 1) {
-    names(x)[1:2] <- c("x", "y") #from the raster pkg mosaic help. Needs x and y (!?)
-    x$fun <- mean
-    x$na.rm <- TRUE
-    r <- do.call(mosaic, x)
-    r[is.nan(r)] <- NA # replace NaN values with NA
-  } else {
-    r <- x[[1]]
+
+  mergeAgeRasters <- function(files) {
+    # Read band 2 from each raster
+    rasters <- lapply(files, function(f) terra::rast(f, lyrs = 2))  # Age is in the second band
+
+    if (length(rasters) > 1) {
+      #r <- do.call(terra::mosaic, c(rasters, fun = "mean"))  # Merge by using `mosaic`, which is slower but handles overlapping cells
+      r <- do.call(terra::merge, rasters) # merge by using `merge`, which is faster but may break with overlapping cells
+    } else {
+      r <- rasters[[1]]
+    }
+
+    # Replace NaN with NA
+    # vals <- terra::values(r)
+    # vals[is.nan(vals)] <- NA
+    # terra::values(r) <- valsQ
+    return(r)
   }
-  names(x) <- NULL
+  r<-mergeAgeRasters(files)
   return(r)
+
 }
 
 applyHarvest <- function(sim) {
@@ -183,7 +172,6 @@ applyHarvest <- function(sim) {
   py$base_year <- year
   sim$fm$base_year <- year
   updateAges(sim)
-  #browser()
   py$simulate_harvest(fm = sim$fm,
                       basenames = P(sim)$basenames,
                       year = year,
@@ -193,8 +181,11 @@ applyHarvest <- function(sim) {
                       verbose = P(sim)$verbose,
                       mgmt_unit_theme = P(sim)$mgmt.unit.theme,
                       workers=P(sim)$workers)
-  sim$landscape$age <- loadAges(sim)
+
+  sim$landscape[["age"]] <- loadAges(sim)
+
   return(invisible(sim))
+
 }
 
 
@@ -206,20 +197,6 @@ applyGrow <- function(sim) {
 
 
 .inputObjects <- function(sim) {
-  # TODO: this should check for "is there a python virtual environment", not "dir.exists" to allow for user's own virtual env.
- # needed <- c("numba>=0.58", "ws3", "datalad[full]", "geopandas", "seaborn", "folium", "debugpy")
-#  if (reticulate::virtualenv_exists("r-reticulate")) {
-#   reticulate::py_install(needed)
-#  } else {
- #   reticulate::virtualenv_create("r-reticulate", packages = needed)
-  #}
-  #reticulate::use_virtualenv("r-reticulate")
 
-  # make sure that datalad-managed input files have all been downloaded from the cloud
-  #system("datalad get input -r")
-
-  #cacheTags <- c(currentModule(sim), "function:.inputObjects") ## uncomment this if Cache is being used
-  #dPath <- asPath(getOption("reproducible.destinationPath", dataPath(sim)), 1)
-  #message(currentModule(sim), ": using dataPath '", dPath, "'.")
   return(invisible(sim))
 }
