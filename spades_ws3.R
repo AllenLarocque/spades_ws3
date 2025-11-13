@@ -18,6 +18,7 @@ defineModule(sim, list(
     defineParameter("basenames", "character", NA, NA, NA, "MU baseneames to load"),
     defineParameter("enable.debugpy", "logical", FALSE, NA, NA, "enable debugpy"),
     defineParameter("horizon", "numeric", 1L, NA, NA, "ws3 simulation horizon (periods)"),
+    defineParameter("planning_period_freq", "numeric", 1L, NA, NA, "Gap between WS3 planning events"),
     defineParameter("base.year", "numeric", 2015L, NA, NA, "ws3 simulation base year"),
     defineParameter("scheduler.mode", "character", "optimize", NA, NA, "Switch between 'optimize' and 'areacontrol' harvest scheduler modes"),
     defineParameter("target.scalefactors", "numeric", NULL, NA, NA, "Target areas scale factors.  Only applicable if using 'areacontrol' scheduler mode."),
@@ -80,9 +81,10 @@ Init <- function(sim) {
   py$dat_path<-inputPath(sim)
   py$basenames <- P(sim)$basenames
   py$enable_debugpy <- P(sim)$enable.debugpy
-  py_run_file(file.path(cmp, "python", "spadesws3_params.py"))
-  py$base_year <- P(sim)$base.year
-  py$horizon <- P(sim)$horizon
+  py_run_file(file.path(cmp, "python", "spadesws3_params.py"))  # This loads the spadesws3_params.py script
+  py$base_year <- P(sim)$base.year       # This overrides spadesws3_params.py defaults
+  py$horizon <- P(sim)$horizon           # This overrides spadesws3_params.py defaults
+  py$planning_period_freq<-P(sim)$planning_period_freq # This overrides spadesws3_params.py defaults
   sim$fm <- py$bootstrap_forestmodel_kwargs()
   py$fm <- sim$fm
   return(invisible(sim))
@@ -175,6 +177,7 @@ applyHarvest <- function(sim) {
   py$simulate_harvest(fm = sim$fm,
                       basenames = P(sim)$basenames,
                       year = year,
+                      planning_period_freq = P(sim)$planning_period_freq,
                       mode = P(sim)$scheduler.mode,
                       target_scalefactors = P(sim)$target.scalefactors,
                       mask_area_thresh = P(sim)$mask.area.thresh,

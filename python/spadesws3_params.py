@@ -130,28 +130,39 @@ def bootstrap_forestmodel_kwargs():
     return bootstrap_forestmodel(**kwargs())
 
 
-def simulate_harvest(fm, basenames, year, 
-                     mode='optimize', 
+def simulate_harvest(fm, basenames, year,
+                     planning_period_freq = 10, # Allen added
+                     mode='optimize',
                      target_scalefactors=None,
                      mask_area_thresh=0.,
-                     verbose=False, 
+                     verbose=False,
                      mgmt_unit_theme=None,
                      workers=1):
     bootstrap_areas(fm, basenames, tif_path, hdt, year, new_dts=False)
     fm.reset()
-    if mode == 'optimize':
-         schedule_harvest_optimize(fm, basenames, p_max_hv=target_scalefactors,
-                                   mgmt_unit_theme=mgmt_unit_theme, workers=workers)
-        #profile_schedule_harvest_optimize(fm, basenames, target_scalefactors, 
-        #                                  mgmt_unit_theme, workers)
-    elif mode == 'areacontrol':
-        schedule_harvest_areacontrol(fm, 
-                                     target_scalefactors=target_scalefactors,
-                                     mask_area_thresh=mask_area_thresh,
-                                     verbose=verbose)
-    else: # bad mode value
-        raise ValueError('Bad mode value')
-    sda(fm, basenames, 1, tif_path, hdt, sda_mode=sda_mode, verbose=verbose)
+
+    # Only schedule harvests at year 0 or multiples of period_length (Allen added)
+    if year == 0 or year % planning_period_freq == 0:  # '%' is the modulo operator. It returns the remainer of a division between the two numbers
+
+      if mode == 'optimize':
+           schedule_harvest_optimize(fm, basenames, p_max_hv=target_scalefactors,
+                                     mgmt_unit_theme=mgmt_unit_theme, workers=workers)
+          #profile_schedule_harvest_optimize(fm, basenames, target_scalefactors,
+          #                                  mgmt_unit_theme, workers)
+      elif mode == 'areacontrol':
+          schedule_harvest_areacontrol(fm,
+                                       target_scalefactors=target_scalefactors,
+                                       mask_area_thresh=mask_area_thresh,
+                                       verbose=verbose)
+      else: # bad mode value
+          raise ValueError('Bad mode value')
+    
+    # SDA runs once per multiple of planning_period_freq
+    if year == 0 or year % planning_period_freq == 0:  # Runs SDA also only once every planning period (Allen added)
+      sda(fm, basenames, 1, tif_path, hdt, sda_mode=sda_mode, verbose=verbose)
+    
+    # SDA runs every year
+    #sda(fm, basenames, 1, tif_path, hdt, sda_mode=sda_mode, verbose=verbose)
 
 def profile_schedule_harvest_optimize(fm, basenames, target_scalefactors, 
                                       mgmt_unit_theme, workers):
