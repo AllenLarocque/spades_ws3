@@ -17,7 +17,7 @@ defineModule(sim, list(
     defineParameter("verbose", "numeric", 0, NA, NA, "console output verbosity level"),
     defineParameter("basenames", "character", NA, NA, NA, "MU baseneames to load"),
     defineParameter("enable.debugpy", "logical", FALSE, NA, NA, "enable debugpy"),
-    defineParameter("horizon", "numeric", 1L, NA, NA, "ws3 simulation horizon (periods)"),
+    defineParameter("horizon", "numeric", 10L, NA, NA, "ws3 simulation horizon (periods)"),
     defineParameter("planning_period_freq", "numeric", 1L, NA, NA, "Gap between WS3 planning events"),
     defineParameter("base.year", "numeric", 2015L, NA, NA, "ws3 simulation base year"),
     defineParameter("scheduler.mode", "character", "optimize", NA, NA, "Switch between 'optimize' and 'areacontrol' harvest scheduler modes"),
@@ -29,6 +29,7 @@ defineModule(sim, list(
     defineParameter(".plotInterval", "numeric", NA, NA, NA, "This describes the simulation time interval between plot events"),
     defineParameter(".saveInitialTime", "numeric", NA, NA, NA, "This describes the simulation time at which the first save event should occur"),
     defineParameter(".saveInterval", "numeric", NA, NA, NA, "This describes the simulation time interval between save events"),
+    defineParameter("saveFM", "logical", FALSE, NA, NA, "Save forest model (fm) object when optimizer runs"),
     defineParameter(".useCache", "logical", FALSE, NA, NA, "Should this entire module be run with caching activated? This is generally intended for data-type modules, where stochasticity and time are not relevant")
   ),
   inputObjects = bind_rows(
@@ -73,19 +74,30 @@ doEvent.spades_ws3 = function(sim, eventTime, eventType) {
 ## event functions
 
 Init <- function(sim) {
-
+  # Prepare the python environment:
   if (is.null(P(sim)$basenames)) stop(paste("'basenames' parameter value not specified in", currentModule(sim)))
   cmp <- grep(pattern = paste0(currentModule(sim), "$"), x = list.files(modulePath(sim))) %>%
-    list.files(path = modulePath(sim), full.names = TRUE)[.] # current module path
+    list.files(path = modulePath(sim), full.names = TRUE)[.] # This outputs the current module path (spades_ws3)
 
-  py$dat_path<-inputPath(sim)
+
+  # Write variables defined in global.R:
   py$basenames <- P(sim)$basenames
+  py$base_year <- P(sim)$base.year                       # This will override spadesws3_params.py defaults
+  py$horizon <- P(sim)$horizon                           # This will override spadesws3_params.py defaults
+  py$planning_period_freq<-P(sim)$planning_period_freq   # This will override spadesws3_params.py defaults
+  py$save_fm <- P(sim)$saveFM                            # This will override spadesws3_params.py defaults
+
+  # Write other variables:
+  py$dat_path<-inputPath(sim)   # data path for python code is the SpaDES /input directory
+  py$output_path <- outputPath(sim)  # output path for saving fm checkpoints
   py$enable_debugpy <- P(sim)$enable.debugpy
+
+  # Run the spadesws3_params.py script:
   py_run_file(file.path(cmp, "python", "spadesws3_params.py"))  # This loads the spadesws3_params.py script
-  py$base_year <- P(sim)$base.year       # This overrides spadesws3_params.py defaults
-  py$horizon <- P(sim)$horizon           # This overrides spadesws3_params.py defaults
-  py$planning_period_freq<-P(sim)$planning_period_freq # This overrides spadesws3_params.py defaults
-  sim$fm <- py$bootstrap_forestmodel_kwargs()
+
+  # Create the forestmodel and output to the simList
+  sim$fm <- py$bootstrap_forestmodel_kwargs()   # THIS MAY BE PROBLEMATIC - ASSSIGNING RETICULATE PYTHON OBJECT TO SIMLIST MAY NEED TO BE DONE VIA SERIALIZING, SAVING, THEN REFERNCING
+
   py$fm <- sim$fm
   return(invisible(sim))
 }
@@ -123,12 +135,6 @@ updateAges <- function(sim, offset = 1) {
   })
   names(rs.list) <- P(sim)$basenames  # Rename the list members their respective TSA names
 
-
-
-  ###############################################################################
-  # age.offset <- -1 # hack (why are age values in landscape raster stack off by 1?)
-  ###############################################################################
-
   rs.list <- rapply(rs.list,  function(rs) {
     rs[[2]] <- terra::crop(sim$landscape$age, rs[[2]]) %>% terra::mask(., rs[[2]])
     rs[[2]][is.nan(rs[[2]])] <- NA
@@ -158,16 +164,15 @@ loadAges <- function(sim) {
       r <- rasters[[1]]
     }
 
-    # Replace NaN with NA
-    # vals <- terra::values(r)
-    # vals[is.nan(vals)] <- NA
-    # terra::values(r) <- valsQ
     return(r)
   }
+
   r<-mergeAgeRasters(files)
   return(r)
 
 }
+
+
 
 applyHarvest <- function(sim) {
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
@@ -183,7 +188,8 @@ applyHarvest <- function(sim) {
                       mask_area_thresh = P(sim)$mask.area.thresh,
                       verbose = P(sim)$verbose,
                       mgmt_unit_theme = P(sim)$mgmt.unit.theme,
-                      workers=P(sim)$workers)
+                      workers = P(sim)$workers,
+                      save_fm = P(sim)$saveFM)
 
   sim$landscape[["age"]] <- loadAges(sim)
 

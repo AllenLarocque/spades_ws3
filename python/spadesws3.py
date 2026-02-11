@@ -58,6 +58,7 @@ def _gen_scen_base(fm, basenames, name,
                    cgen_hv=None, cgen_ha=None, cgen_hv_e=None, cgen_ha_e=None, cgen_e_default=0.01,
                    cflw_hv=True, cflw_ha=True, cflw_hv_e=None, cflw_ha_e=None, cflw_e_default=0.05,
                    mask=None, workers=1):
+    workers = int(workers)
     from functools import partial
     acodes = ['null', harvest_acode]
     vexpr = '%s * %0.2f' % (tvy_name, util)
@@ -185,6 +186,7 @@ def gen_scen(
     mgmt_unit_theme=None,
     workers=1
 ):
+    workers = int(workers)
     """
     Dispatcher for generating ws3 optimization problems.
 
@@ -470,6 +472,7 @@ def compile_basecodes(hdt, basenames, theme_cols):
     return basecodes
 
 def _solve_stage(fm, problems, stage_label, workers=1, warm_starts=None):
+    workers = int(workers)
     """
     Solve one optimization stage for single or multi-unit problems in parallel if requested.
 
@@ -563,6 +566,7 @@ def schedule_harvest_optimize(
     mgmt_unit_theme=None,
     workers=1
 ):
+    workers = int(workers)
     """
     Run a two-stage harvest scheduling optimization:
 
