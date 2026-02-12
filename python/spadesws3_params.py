@@ -49,6 +49,9 @@ import shutil
 from spadesws3 import clean_shapefiles, rasterize_inventory, read_basenames, compile_basecodes, bootstrap_forestmodel, bootstrap_areas, schedule_harvest_optimize, schedule_harvest_areacontrol, sda
 
 # configure paths and global default variables
+if 'base_year' not in globals() or base_year is None:
+    base_year = 2015
+
 scenario_name = 'base'
 sda_mode = 'randblk'       # 'randpxl'
 obj_mode = 'min_harea'     # 'max_harea'
@@ -72,7 +75,6 @@ age_col = 'age'
 theme_cols = ['theme0', 'theme1', 'theme2', 'theme3']
 compress = 'lzw'
 dtype = rasterio.uint8
-base_year = 2015
 prop_names = [u'THLB', u'AU', u'LdSpp', u'Age2015', u'Shape_Area']
 prop_types = [(u'theme0', 'str:10'),
               (u'theme1', 'str:1'),
@@ -173,7 +175,7 @@ def _save_forestmodel(fm, year, verbose=False):
         except (RuntimeError, RecursionError):
             pass  # Skip if recursion limit reached
     
-    # Clear solver models before saving (they'll be recreated when needed)
+    # Clear solver models before saving
     clear_solver_models(fm)
     
     # Save the forest model
@@ -185,7 +187,7 @@ def _save_forestmodel(fm, year, verbose=False):
 
 
 def simulate_harvest(fm, basenames, year,
-                     planning_period_freq = 10, # Allen added
+                     planning_period_freq = 10, # Allen added to modulate planning period frequency
                      mode='optimize',
                      target_scalefactors=None,
                      mask_area_thresh=0.,
@@ -218,6 +220,7 @@ def simulate_harvest(fm, basenames, year,
     
     # Convert workers to int (R numeric values come through as float)
     workers = int(workers) if workers is not None else 1
+    print('simulate_harvest: workers=%d, year=%d' % (workers, year))
     
     if verbose or save_fm:
         print('simulate_harvest: save_fm=%s, year=%d' % (save_fm, year))
@@ -226,7 +229,7 @@ def simulate_harvest(fm, basenames, year,
     fm.reset()
 
     # Only schedule harvests at year 0 or multiples of period_length (Allen added)
-    if year == 0 or year % planning_period_freq == 0:  # '%' is the modulo operator. It returns the remainer of a division between the two numbers
+    if (year-base_year) % planning_period_freq == 0:  # '%' is the modulo operator. It returns the remainer of a division between the two numbers
 
       if mode == 'optimize':
            schedule_harvest_optimize(fm, basenames, p_max_hv=target_scalefactors,
@@ -257,7 +260,7 @@ def simulate_harvest(fm, basenames, year,
     ## After harvests are scheduled, spatialize them by running SDA (Spatial Disturbance Allocator)
     # This connects the aspatial harvests to the raster map
     # SDA runs once at year 0 and then every multiple of planning_period_freq
-    if year == 0 or year % planning_period_freq == 0:  # Allen added. Runs SDA at year 0 and also every multiple of the planning_period_freq
+    if (year-base_year) % planning_period_freq == 0:  # Allen added. Runs SDA at year 0 and also every multiple of the planning_period_freq
       sda(fm, basenames, 1, tif_path, hdt, sda_mode=sda_mode, verbose=verbose)
     
     # SDA runs every year

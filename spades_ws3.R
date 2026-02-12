@@ -74,6 +74,9 @@ doEvent.spades_ws3 = function(sim, eventTime, eventType) {
 ## event functions
 
 Init <- function(sim) {
+    # Clean up any generated tif files from previous runs. This ensures that you have a clean slate each run:
+  cleanupGeneratedTifs(sim)
+
   # Prepare the python environment:
   if (is.null(P(sim)$basenames)) stop(paste("'basenames' parameter value not specified in", currentModule(sim)))
   cmp <- grep(pattern = paste0(currentModule(sim), "$"), x = list.files(modulePath(sim))) %>%
@@ -176,8 +179,7 @@ loadAges <- function(sim) {
 
 applyHarvest <- function(sim) {
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
-  py$base_year <- year
-  sim$fm$base_year <- year
+  sim$fm$base_year <- year  # update the fm's base year to be the first year of its optimization
   updateAges(sim)
   py$simulate_harvest(fm = sim$fm,
                       basenames = P(sim)$basenames,
@@ -202,6 +204,42 @@ applyGrow <- function(sim) {
   sim$landscape$age <- sim$landscape$age + 1
   updateAges(sim, offset=1)
   return(invisible(sim))
+}
+
+## Cleanup function to remove generated tif files from previous runs
+cleanupGeneratedTifs <- function(sim) {
+  # Patterns for files that should be deleted (generated during runs, not in datalad)
+  patterns <- c("projected_harvest_*.tif", "inventory_*.tif")
+
+  # Loop through each basename
+  for (bn in P(sim)$basenames) {
+    tif_dir <- file.path(inputPath(sim), P(sim)$tif.path, bn)
+
+    if (dir.exists(tif_dir)) {
+      # Find all files matching the patterns
+      for (pattern in patterns) {
+        # Use Sys.glob to find matching files
+        matching_files <- Sys.glob(file.path(tif_dir, pattern))
+
+        # Filter out inventory_init.tif (should be in datalad repo)
+        if (pattern == "inventory_*.tif") {
+          init_file <- file.path(tif_dir, "inventory_init.tif")
+          matching_files <- setdiff(matching_files, init_file)
+        }
+
+        # Delete matching files
+        if (length(matching_files) > 0) {
+          message("Cleaning up ", length(matching_files), " file(s) matching '", pattern,
+                  "' in ", tif_dir)
+          unlink(matching_files)
+        }
+      }
+    } else {
+      message("Tif directory does not exist: ", tif_dir)
+    }
+  }
+
+  return(invisible(NULL))
 }
 
 
