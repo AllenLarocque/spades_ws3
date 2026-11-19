@@ -55,7 +55,10 @@ if 'base_year' not in globals() or base_year is None:
 scenario_name = 'base'
 sda_mode = 'randblk'       # 'randpxl'
 obj_mode = 'min_harea'     # 'max_harea'
-horizon = 10
+# horizon (planning periods) comes from the spades_ws3 'horizon' parameter, set by R as py$horizon
+if 'horizon' not in globals() or horizon is None:
+    horizon = 10
+horizon = int(horizon)
 period_length = 10
 yields_period_length = 10
 yields_x_unit = 'years'
