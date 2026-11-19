@@ -131,18 +131,7 @@ updateAges <- function(sim, offset = 1) {
                                           paste("inventory_", toString(year+offset), ".tif", sep="")))
 
 
-  rs.list <- lapply(files1, function(f) {
-    r <- terra::rast(f)
-    r <- terra::deepcopy(r)  # ensures a memory copy, not linked to disk
-    r
-  })
-  names(rs.list) <- P(sim)$basenames  # Rename the list members their respective TSA names
-
-  rs.list <- rapply(rs.list,  function(rs) {
-    rs[[2]] <- terra::crop(sim$landscape$age, rs[[2]]) %>% terra::mask(., rs[[2]])
-    rs[[2]][is.nan(rs[[2]])] <- NA
-    return(rs)})
-  mapply(terra::writeRaster, rs.list, files2, filetype='GTiff', overwrite=TRUE, datatype='INT4S')
+  writeInventoryAges(sim$landscape$age, files1, files2)
   return(invisible(sim))
 }
 
@@ -180,7 +169,10 @@ loadAges <- function(sim) {
 applyHarvest <- function(sim) {
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
   sim$fm$base_year <- year  # update the fm's base year to be the first year of its optimization
-  updateAges(sim)
+  # Copy sim$landscape$age into this year's inventory, which simulate_harvest() bootstraps
+  # from, so age changes made by other modules since the last grow event (e.g. burned
+  # pixels reset to 0) reach ws3. Without such changes the two are already equal.
+  updateAges(sim, offset = 0)
   py$simulate_harvest(fm = sim$fm,
                       basenames = P(sim)$basenames,
                       year = year,
