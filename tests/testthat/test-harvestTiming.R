@@ -27,6 +27,16 @@ test_that("a planned pixel reset since the plan (burned) is skipped and counted"
   expect_equal(v[, 2], c(0, 2, 103, 113))
   expect_equal(v[, 1], c(21, 11, 12, 12))
   expect_equal(c(res$planned, res$applied, res$skippedReset), c(2, 1, 1))
+  expect_equal(terra::values(res$applied_mask)[, 1], c(1, NA, NA, NA))   # realised harvest excludes it
+})
+
+test_that("a stand burned two years before its scheduled cut is not harvested", {
+  # planned for year 5 of the period; burned in year 3, so now age 2 instead of 90 + 5
+  current <- inv(c(11, 11, 12, 12), c(85, 2, 105, 115))
+  res <- applyAnnualHarvest(current, prePlan, postPlan, one(c(NA, 1, NA, NA)), elapsed = 5)
+  expect_equal(res$skippedReset, 1)
+  expect_equal(unname(terra::values(res$inventory)[2, 1:2]), c(11, 2))
+  expect_true(all(is.na(terra::values(res$applied_mask))))
 })
 
 test_that("in the planning year the slice applies to the pre-plan inventory", {
@@ -45,4 +55,10 @@ test_that("harvestTiming defaults to 'period' (no change for existing runs)", {
   src <- paste(readLines(test_path("..", "..", "spades_ws3.R")), collapse = "\n")
   expect_match(src, 'defineParameter\\("harvestTiming", "character", "period"')
   expect_match(src, 'if \\(annual\\) sim <- applyAnnualHarvestSlice')
+})
+
+test_that("annual timing is refused unless planning_period_freq equals the ws3 period length", {
+  src <- paste(readLines(test_path("..", "..", "spades_ws3.R")), collapse = "\n")
+  expect_match(src, 'identical\\(P\\(sim\\)\\$harvestTiming, "annual"\\) &&\\s*!isTRUE\\(all.equal\\(P\\(sim\\)\\$planning_period_freq, py\\$period_length\\)\\)')
+  expect_match(src, 'missing ", harvestFile')
 })
