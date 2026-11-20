@@ -12,7 +12,8 @@
 #' @param postPlan SpatRaster. Inventory the SDA wrote at the planning year (whole period harvested).
 #' @param harvest  SpatRaster. This year's planned harvest (`projected_harvest_<year>.tif`, 1 = harvest).
 #' @param elapsed  Integer. Years since the planning year.
-#' @return List: `inventory` (SpatRaster, in memory), `planned`, `applied`, `skippedReset` (pixel counts).
+#' @return List: `inventory` (SpatRaster, in memory), `applied_mask` (SpatRaster, 1 = harvested,
+#'   NA otherwise), `planned`, `applied`, `skippedReset` (pixel counts).
 applyAnnualHarvest <- function(current, prePlan, postPlan, harvest, elapsed) {
   cur  <- terra::values(current)
   pre  <- terra::values(prePlan)
@@ -25,5 +26,8 @@ applyAnnualHarvest <- function(current, prePlan, postPlan, harvest, elapsed) {
   out <- terra::rast(current)
   terra::values(out) <- cur
   names(out) <- names(current)
-  list(inventory = out, planned = sum(planned), applied = sum(apply), skippedReset = sum(reset))
+  appliedMask <- terra::rast(current, nlyrs = 1)
+  terra::values(appliedMask) <- ifelse(apply, 1L, NA_integer_)
+  list(inventory = out, applied_mask = appliedMask,
+       planned = sum(planned), applied = sum(apply), skippedReset = sum(reset))
 }
