@@ -136,6 +136,10 @@ updateAges <- function(sim, offset = 1) {
 }
 
 
+inventoryFilesForYear <- function(sim, year) {
+  file.path(inputPath(sim), P(sim)$tif.path, P(sim)$basenames, paste0("inventory_", year, ".tif"))
+}
+
 loadAges <- function(sim) {
 
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
@@ -169,10 +173,10 @@ loadAges <- function(sim) {
 applyHarvest <- function(sim) {
   year <- as.integer(time(sim) - start(sim) + P(sim)$base.year)
   sim$fm$base_year <- year  # update the fm's base year to be the first year of its optimization
-  # Copy sim$landscape$age into this year's inventory, which simulate_harvest() bootstraps
-  # from, so age changes made by other modules since the last grow event (e.g. burned
-  # pixels reset to 0) reach ws3. Without such changes the two are already equal.
-  updateAges(sim, offset = 0)
+  # Copy age resets other modules made in sim$landscape$age since the last grow event (e.g.
+  # burned pixels set to 0) into this year's inventory, which simulate_harvest() bootstraps
+  # from; otherwise loadAges() below would copy the old ages back. No resets: no change.
+  syncAgeResets(sim$landscape$age, inventoryFilesForYear(sim, year))
   py$simulate_harvest(fm = sim$fm,
                       basenames = P(sim)$basenames,
                       year = year,
