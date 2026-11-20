@@ -34,7 +34,9 @@ defineModule(sim, list(
                     paste("When a planned period's harvest reaches the inventory. 'period' (default): all of it in",
                           "the planning year, as ws3's spatial allocation writes it. 'annual': each year's slice",
                           "(projected_harvest_<year>.tif) in that year, skipping planned pixels whose age was",
-                          "reset since the plan (e.g. burned); counts go to harvestTimingStats.")),
+                          "reset since the plan (e.g. burned); counts go to harvestTimingStats and the",
+                          "harvested pixels to applied_harvest_<year>.tif. Needs planning_period_freq equal",
+                          "to the ws3 period length.")),
     defineParameter(".useCache", "logical", FALSE, NA, NA, "Should this entire module be run with caching activated? This is generally intended for data-type modules, where stochasticity and time are not relevant")
   ),
   inputObjects = bind_rows(
@@ -44,7 +46,9 @@ defineModule(sim, list(
     createsOutput(objectName = 'landscape', objectClass = 'SpatRaster', desc = 'SpatRaster landscape attributes'),
     createsOutput(objectName = 'harvestTimingStats', objectClass = 'data.table',
                   desc = paste("harvestTiming = 'annual' only. One row per year and management unit: year, basename,",
-                               "plannedPixels, appliedPixels, skippedResetPixels (planned but reset since the plan)."))
+                               "plannedPixels, appliedPixels, skippedResetPixels (planned but reset since the plan).",
+                               "The applied pixels are also written as applied_harvest_<year>.tif next to",
+                               "projected_harvest_<year>.tif (1 = harvested)."))
   )
 ))
 
@@ -105,6 +109,11 @@ Init <- function(sim) {
 
   # Run the spadesws3_params.py script:
   py_run_file(file.path(cmp, "python", "spadesws3_params.py"))  # This loads the spadesws3_params.py script
+  if (identical(P(sim)$harvestTiming, "annual") &&
+      !isTRUE(all.equal(P(sim)$planning_period_freq, py$period_length)))
+    stop("spades_ws3: harvestTiming = 'annual' needs planning_period_freq (", P(sim)$planning_period_freq,
+         ") equal to the ws3 period length (", py$period_length, "): each plan's spatial allocation ",
+         "covers one period, so other gaps would leave years without slices or drop slices")
 
   # Create the forestmodel and output to the simList
   sim$fm <- py$bootstrap_forestmodel_kwargs()   # THIS MAY BE PROBLEMATIC - ASSSIGNING RETICULATE PYTHON OBJECT TO SIMLIST MAY NEED TO BE DONE VIA SERIALIZING, SAVING, THEN REFERNCING
@@ -159,12 +168,16 @@ applyAnnualHarvestSlice <- function(sim, year, invFiles, planningYear) {
   for (bn in names(invFiles)) {
     current <- if (planningYear) mod$prePlan[[bn]] else terra::toMemory(terra::rast(invFiles[[bn]]))
     harvestFile <- file.path(inputPath(sim), P(sim)$tif.path, bn, paste0("projected_harvest_", year, ".tif"))
-    harvest <- if (file.exists(harvestFile)) terra::rast(harvestFile) else {
-      h <- terra::rast(current, nlyrs = 1); terra::values(h) <- NA; h
-    }
+    # ws3 writes a raster for every year of the planned period, even with no harvest
+    if (!file.exists(harvestFile))
+      stop("spades_ws3: harvestTiming = 'annual': missing ", harvestFile)
+    harvest <- terra::rast(harvestFile)
     res <- applyAnnualHarvest(current, mod$prePlan[[bn]], mod$postPlan[[bn]], harvest,
                               elapsed = year - mod$planYear)
     terra::writeRaster(res$inventory, invFiles[[bn]], filetype = "GTiff", overwrite = TRUE, datatype = "INT4S")
+    # What was actually harvested (planned minus skipped), for modules that report realised harvest
+    terra::writeRaster(res$applied_mask, sub("projected_harvest_", "applied_harvest_", harvestFile),
+                       filetype = "GTiff", overwrite = TRUE, datatype = "INT1U")
     sim$harvestTimingStats <- rbind(sim$harvestTimingStats,
                                     data.table::data.table(year = year, basename = bn,
                                                            plannedPixels = res$planned,
