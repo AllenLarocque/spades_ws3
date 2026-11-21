@@ -10,7 +10,7 @@ defineModule(sim, list(
   timeunit = "year",
   citation = list("citation.bib"),
   documentation = list("README.txt", "spades_ws3.Rmd"),
-  reqdPkgs = list('R.utils', 'reticulate'),
+  reqdPkgs = list('R.utils', 'reticulate', 'terra', 'data.table'),
   parameters = rbind(
     defineParameter("mgmt.unit.theme", "numeric", NULL, NA, NA, "management unit theme index"),
     defineParameter("workers", "numeric", 1L, NA, NA, "number of worker threads to use for paralellized functions"),
@@ -30,13 +30,25 @@ defineModule(sim, list(
     defineParameter(".saveInitialTime", "numeric", NA, NA, NA, "This describes the simulation time at which the first save event should occur"),
     defineParameter(".saveInterval", "numeric", NA, NA, NA, "This describes the simulation time interval between save events"),
     defineParameter("saveFM", "logical", FALSE, NA, NA, "Save forest model (fm) object when optimizer runs"),
+    defineParameter("harvestTiming", "character", "period", NA, NA,
+                    paste("When a planned period's harvest reaches the inventory. 'period' (default): all of it in",
+                          "the planning year, as ws3's spatial allocation writes it. 'annual': each year's slice",
+                          "(projected_harvest_<year>.tif) in that year, skipping planned pixels whose age was",
+                          "reset since the plan (e.g. burned); counts go to harvestTimingStats and the",
+                          "harvested pixels to applied_harvest_<year>.tif. Needs planning_period_freq equal",
+                          "to the ws3 period length.")),
     defineParameter(".useCache", "logical", FALSE, NA, NA, "Should this entire module be run with caching activated? This is generally intended for data-type modules, where stochasticity and time are not relevant")
   ),
   inputObjects = bind_rows(
     expectsInput(objectName = "landscape", objectClass = "SpatRaster", desc = "stand age", sourceURL = NA)
   ),
   outputObjects = bind_rows(
-    createsOutput(objectName = 'landscape', objectClass = 'SpatRaster', desc = 'SpatRaster landscape attributes')
+    createsOutput(objectName = 'landscape', objectClass = 'SpatRaster', desc = 'SpatRaster landscape attributes'),
+    createsOutput(objectName = 'harvestTimingStats', objectClass = 'data.table',
+                  desc = paste("harvestTiming = 'annual' only. One row per year and management unit: year, basename,",
+                               "plannedPixels, appliedPixels, skippedResetPixels (planned but reset since the plan).",
+                               "The applied pixels are also written as applied_harvest_<year>.tif next to",
+                               "projected_harvest_<year>.tif (1 = harvested)."))
   )
 ))
 
@@ -97,6 +109,11 @@ Init <- function(sim) {
 
   # Run the spadesws3_params.py script:
   py_run_file(file.path(cmp, "python", "spadesws3_params.py"))  # This loads the spadesws3_params.py script
+  if (identical(P(sim)$harvestTiming, "annual") &&
+      !isTRUE(all.equal(P(sim)$planning_period_freq, py$period_length)))
+    stop("spades_ws3: harvestTiming = 'annual' needs planning_period_freq (", P(sim)$planning_period_freq,
+         ") equal to the ws3 period length (", py$period_length, "): each plan's spatial allocation ",
+         "covers one period, so other gaps would leave years without slices or drop slices")
 
   # Create the forestmodel and output to the simList
   sim$fm <- py$bootstrap_forestmodel_kwargs()   # THIS MAY BE PROBLEMATIC - ASSSIGNING RETICULATE PYTHON OBJECT TO SIMLIST MAY NEED TO BE DONE VIA SERIALIZING, SAVING, THEN REFERNCING
@@ -135,6 +152,40 @@ updateAges <- function(sim, offset = 1) {
   return(invisible(sim))
 }
 
+
+inventoryFiles <- function(sim, year) {
+  stats::setNames(file.path(inputPath(sim), P(sim)$tif.path, P(sim)$basenames,
+                            paste0("inventory_", year, ".tif")),
+                  P(sim)$basenames)
+}
+
+## harvestTiming = "annual": replace the inventory ws3 just wrote (planning year: whole period
+## harvested) or kept (other years) with the pre-harvest inventory plus this year's slice.
+applyAnnualHarvestSlice <- function(sim, year, invFiles, planningYear) {
+  if (is.null(mod$planYear))
+    stop("spades_ws3: harvestTiming = 'annual' needs a planning year at or before ", year)
+  if (planningYear) mod$postPlan <- lapply(invFiles, function(f) terra::toMemory(terra::rast(f)))
+  for (bn in names(invFiles)) {
+    current <- if (planningYear) mod$prePlan[[bn]] else terra::toMemory(terra::rast(invFiles[[bn]]))
+    harvestFile <- file.path(inputPath(sim), P(sim)$tif.path, bn, paste0("projected_harvest_", year, ".tif"))
+    # ws3 writes a raster for every year of the planned period, even with no harvest
+    if (!file.exists(harvestFile))
+      stop("spades_ws3: harvestTiming = 'annual': missing ", harvestFile)
+    harvest <- terra::rast(harvestFile)
+    res <- applyAnnualHarvest(current, mod$prePlan[[bn]], mod$postPlan[[bn]], harvest,
+                              elapsed = year - mod$planYear)
+    terra::writeRaster(res$inventory, invFiles[[bn]], filetype = "GTiff", overwrite = TRUE, datatype = "INT4S")
+    # What was actually harvested (planned minus skipped), for modules that report realised harvest
+    terra::writeRaster(res$applied_mask, sub("projected_harvest_", "applied_harvest_", harvestFile),
+                       filetype = "GTiff", overwrite = TRUE, datatype = "INT1U")
+    sim$harvestTimingStats <- rbind(sim$harvestTimingStats,
+                                    data.table::data.table(year = year, basename = bn,
+                                                           plannedPixels = res$planned,
+                                                           appliedPixels = res$applied,
+                                                           skippedResetPixels = res$skippedReset))
+  }
+  return(invisible(sim))
+}
 
 inventoryFilesForYear <- function(sim, year) {
   file.path(inputPath(sim), P(sim)$tif.path, P(sim)$basenames, paste0("inventory_", year, ".tif"))
@@ -177,6 +228,16 @@ applyHarvest <- function(sim) {
   # burned pixels set to 0) into this year's inventory, which simulate_harvest() bootstraps
   # from; otherwise loadAges() below would copy the old ages back. No resets: no change.
   syncAgeResets(sim$landscape$age, inventoryFilesForYear(sim, year))
+  annual <- identical(P(sim)$harvestTiming, "annual")
+  if (!P(sim)$harvestTiming %in% c("period", "annual"))
+    stop("spades_ws3: harvestTiming must be 'period' or 'annual'")
+  # Same test as simulate_harvest() in spadesws3_params.py, which plans and runs the SDA then
+  planningYear <- (year - P(sim)$base.year) %% P(sim)$planning_period_freq == 0
+  invFiles <- inventoryFiles(sim, year)
+  if (annual && planningYear) {
+    mod$prePlan  <- lapply(invFiles, function(f) terra::toMemory(terra::rast(f)))  # the SDA rewrites these files
+    mod$planYear <- year
+  }
   py$simulate_harvest(fm = sim$fm,
                       basenames = P(sim)$basenames,
                       year = year,
@@ -188,6 +249,8 @@ applyHarvest <- function(sim) {
                       mgmt_unit_theme = P(sim)$mgmt.unit.theme,
                       workers = P(sim)$workers,
                       save_fm = P(sim)$saveFM)
+
+  if (annual) sim <- applyAnnualHarvestSlice(sim, year, invFiles, planningYear)
 
   sim$landscape[["age"]] <- loadAges(sim)
 
